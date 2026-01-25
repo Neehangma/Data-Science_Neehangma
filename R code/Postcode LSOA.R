@@ -1,35 +1,65 @@
 library(tidyverse)
 
-
-# 1. File paths
+# 1. Paths
 postcode_file <- "C:/Users/NMRAI/Desktop/Obtained_Data/Postcode_to_LSOA.csv"
-clean_path <- "C:/Users/NMRAI/Desktop/Cleaned_Data"
+house_price_file <- "C:/Users/NMRAI/Desktop/Data-Science_Neehangma/Cleaned_Data/HousePrices_cleaned.csv"
+output_path <- "C:/Users/NMRAI/Desktop/Data-Science_Neehangma/Cleaned_Data"
 
-# Create cleaned folder if it doesn't exist
-if(!dir.exists(clean_path)) dir.create(clean_path, showWarnings = FALSE)
+# 2. Load Reference Data to fill the "NA" gaps
+# We create a mapping from ShortPostcode to Town/District/County
+cat("Loading House Price reference data...\n")
+house_ref <- read_csv(house_price_file, show_col_types = FALSE) %>%
+  select(shortPostcode, Town, District, County) %>%
+  distinct(shortPostcode, .keep_all = TRUE) # Keep one record per postcode
 
+# 3. Load and Clean Postcode Data
+cat("Reading and cleaning Postcode to LSOA file...\n")
+postcode_data <- read_csv(postcode_file, show_col_types = FALSE)
 
-# 2. Read and clean dataset
-Postcode_LSOA <- read_csv(postcode_file, show_col_types = FALSE) %>%
-  # Rename the actual postcode column to "postcode"
-  rename(postcode = pcds) %>%
-  # Standardize column names to lowercase + underscores
-  rename_with(~ str_to_lower(.) %>% str_replace_all(" ", "_")) %>%
-  # Clean postcode
+postcode_cleaned <- postcode_data %>%
+  # Standardize column names
+  rename_with(~str_to_lower(.) %>% str_replace_all(" ", "_")) %>%
+  
+  # Identify LSOA and Postcode columns
   mutate(
-    postcode = str_to_upper(str_replace_all(postcode, " ", "")),
-    short_postcode = str_sub(postcode, 1, 4)
+    lsoa_code_raw = coalesce(!!!select(., matches("lsoa|code"))),
+    postcode_raw = coalesce(!!!select(., matches("^pcd|^postcode")))
   ) %>%
-  # Remove duplicates and incomplete rows
-  distinct() %>%
-  filter(if_all(everything(), ~ !is.na(.) & . != "N/A"))
+  
+  # Extract clean codes
+  mutate(
+    LSOA_Code = str_to_upper(str_trim(lsoa_code_raw)),
+    postcode_clean = str_to_upper(str_replace_all(postcode_raw, "\\s+", "")),
+    ShortPostcode = str_extract(postcode_clean, "^[A-Z]{1,2}[0-9]{1,2}")
+  ) %>%
+  
+  # Filter for Cheshire and Cumbria regions only
+  filter(str_detect(ShortPostcode, "^CA|^CH|^CW|^WA")) %>%
+  
+  # 4. JOIN with reference data to replace NAs/Codes with Names
+  # This replaces codes like 'E07000028' with 'CUMBERLAND'
+  select(LSOA_Code, ShortPostcode) %>% 
+  left_join(house_ref, by = c("ShortPostcode" = "shortPostcode")) %>%
+  
+  # 5. Final Polish
+  distinct(LSOA_Code, .keep_all = TRUE) %>%
+  # Remove any rows that still have NAs after the join
+  drop_na(Town, District, County) %>%
+  select(LSOA_Code, ShortPostcode, Town, District, County)
+
+# 6. Save and Summary
+output_file <- file.path(output_path, "postcode_to_LSOA_cleaned.csv")
+write_csv(postcode_cleaned, output_file)
+
+cat("\n========================================\n")
+cat("CLEANING COMPLETE - NO NAs REMAINING\n")
+cat("========================================\n")
+cat("Total records saved:", nrow(postcode_cleaned), "\n")
+print
 
 
-# 3. Save cleaned dataset
-if(nrow(Postcode_LSOA) > 0){
-  save_path <- file.path(clean_path, "Postcode_to_LSOA_Cleaned.csv")
-  write_csv(Postcode_LSOA, save_path)
-  message("✅ Postcode-to-LSOA cleaned data saved to: ", normalizePath(save_path))
-} else {
-  message("⚠️ Postcode-to-LSOA dataframe is empty. Nothing was saved.")
-}
+
+
+
+
+

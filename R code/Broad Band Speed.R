@@ -1,57 +1,42 @@
 library(tidyverse)
 
+#  path to broadband PERFORMANCE data
+speed_file <- "C:/Users/NMRAI/Desktop/Data-Science_Neehangma/Obtained_Data/BroadbandSpeed/201805_fixed_pc_performance_r03.csv"
 
-# Base paths
-broadband_folder <- "C:/Users/NMRAI/Desktop/Obtained_Data/BroadbandSpeed"
-clean_path <- "C:/Users/NMRAI/Desktop/Cleaned_Data"
-
-if(!dir.exists(clean_path)) dir.create(clean_path, showWarnings = FALSE)
-
-
-# List CSV files
-broadband_files <- list.files(broadband_folder, pattern = "\\.csv$", full.names = TRUE)
-
-# Function to clean a single broadband file
-clean_broadband <- function(file) {
-  df <- read_csv(file, show_col_types = FALSE)
-  
-  # Check column names
-  cols <- tolower(names(df))
-  names(df) <- str_replace_all(cols, " ", "_")  # convert to lowercase + underscores
-  
-  # Rename only if column exists
-  if("average_download_speed_mbit_s" %in% names(df)) names(df)[names(df) == "average_download_speed_mbit_s"] <- "avg_download"
-  if("maximum_download_speed_mbit_s" %in% names(df)) names(df)[names(df) == "maximum_download_speed_mbit_s"] <- "max_download"
-  
-  # Postcode cleanup
-  if("postcode" %in% names(df)){
-    df <- df %>%
-      mutate(
-        postcode = str_to_upper(str_replace_all(postcode, " ", "")),
-        short_postcode = str_sub(postcode, 1, 4)
-      )
-  }
-  
-  # Convert numeric columns safely
-  if("avg_download" %in% names(df)) df$avg_download <- as.numeric(str_remove_all(df$avg_download, "[^0-9\\.]"))
-  if("max_download" %in% names(df)) df$max_download <- as.numeric(str_remove_all(df$max_download, "[^0-9\\.]"))
-  
-  # Remove duplicates and missing rows
-  df %>%
-    distinct() %>%
-    filter(if_all(everything(), ~ !is.na(.) & . != "N/A"))
-}
+# Read raw performance data
+BroadbandRaw <- read_csv(speed_file, show_col_types = FALSE)
 
 
-# Clean and merge all broadband files
-Broadband <- map_dfr(broadband_files, clean_broadband)
+# Clean column names
+names(BroadbandRaw) <- names(BroadbandRaw) %>%
+  tolower() %>%
+  gsub(" ", "_", .) %>%
+  gsub("[^[:alnum:]_]", "", .)
 
 
-# Save cleaned broadband data
-if(nrow(Broadband) > 0){
-  save_path <- file.path(clean_path, "Broadband_Cleaned.csv")
-  write_csv(Broadband, save_path)
-  message("✅ Broadband cleaned data saved to: ", normalizePath(save_path))
-} else {
-  message("⚠️ Broadband dataframe is empty. Nothing was saved.")
-}
+# Clean and summaries PERFORMANCE data only
+BroadbandSpeedCleaned <- BroadbandRaw %>%
+  select(
+    postcode,
+    average_download_speed_mbits,
+    average_upload_speed_mbits
+  ) %>%
+  mutate(
+    postcode = str_replace_all(postcode, " ", ""),
+    shortPostcode = str_sub(postcode, 1, 4),
+    average_download_speed_mbits = as.numeric(average_download_speed_mbits),
+    average_upload_speed_mbits   = as.numeric(average_upload_speed_mbits)
+  ) %>%
+  group_by(shortPostcode) %>%
+  summarise(
+    AvgDownload = mean(average_download_speed_mbits, na.rm = TRUE),
+    AvgUpload   = mean(average_upload_speed_mbits, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Save cleaned PERFORMANCE data
+clean_path <- "C:/Users/NMRAI/Desktop/Data-Science_Neehangma/Cleaned_Data"
+if (!dir.exists(clean_path)) dir.create(clean_path, showWarnings = FALSE)
+save_file <- file.path(clean_path, "CleanedBroadband_Performance.csv")
+write_csv(BroadbandSpeedCleaned, save_file)
+message("Cleaned performance data saved to: ", normalizePath(save_file))
